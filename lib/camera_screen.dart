@@ -1,28 +1,23 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
+import 'video.dart';
 
-class CameraScreen extends StatefulWidget {
+class CameraPage extends StatefulWidget {
+  const CameraPage({Key? key}) : super(key: key);
+
   @override
-  _CameraScreenState createState() => _CameraScreenState();
+  _CameraPageState createState() => _CameraPageState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
+class _CameraPageState extends State<CameraPage> {
+  bool _isLoading = true;
+  bool _isRecording = false;
   late CameraController _cameraController;
-  late List<CameraDescription> _availableCameras;
-  late Timer _timer;
-  int _secondsLeft = 20;
 
   @override
   void initState() {
+    _initCamera();
     super.initState();
-    _initializeCamera();
   }
 
   @override
@@ -31,80 +26,57 @@ class _CameraScreenState extends State<CameraScreen> {
     super.dispose();
   }
 
-  void _initializeCamera() async {
-    _availableCameras = await availableCameras();
-    _cameraController = CameraController(_availableCameras[0], ResolutionPreset.high);
+  _initCamera() async {
+    final cameras = await availableCameras();
+    final back = cameras.firstWhere((camera) =>
+    camera.lensDirection == CameraLensDirection.back);
+    _cameraController = CameraController(back, ResolutionPreset.max);
     await _cameraController.initialize();
-    setState(() {});
+    setState(() => _isLoading = false);
   }
 
-  void _startTimer() {
-    const oneSec = const Duration(seconds: 1);
-    _timer = Timer.periodic(
-      oneSec,
-          (timer) => setState(() {
-        if (_secondsLeft < 1) {
-          timer.cancel();
-          _processVideo();
-        } else {
-          _secondsLeft--;
-        }
-      }),
-    );
-  }
-
-  Future<void> _processVideo() async {
-    final String videoPath = '${(await getTemporaryDirectory()).path}/video.mp4';
-    await _cameraController.stopVideoRecording();
-    final File videoFile = File(videoPath);
-    final bytes = await videoFile.readAsBytes();
-    final response = await http.post(
-      'https://yourbackendurl.com/process-video' as Uri,
-      headers: {'Content-Type': 'application/octet-stream'},
-      body: bytes,
-    );
-    if (response.statusCode == 200) {
-      Fluttertoast.showToast(
-        msg: 'Recording Complete',
-        toastLength: Toast.LENGTH_SHORT,
-        gravity: ToastGravity.BOTTOM,
-        timeInSecForIosWeb: 1,
-        backgroundColor: Colors.grey[600],
-        textColor: Colors.white,
-        fontSize: 16.0,
+  _recordVideo() async {
+    if (_isRecording) {
+      final file = await _cameraController.stopVideoRecording();
+      setState(() => _isRecording = false);
+      final route = MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => VideoPage(filePath: file.path),
       );
-      Navigator.pop(context);
+      Navigator.push(context, route);
+    } else {
+      await _cameraController.prepareForVideoRecording();
+      await _cameraController.startVideoRecording();
+      setState(() => _isRecording = true);
     }
-  }
-
-  void _startRecording() async {
-    _startTimer();
-    final String videoPath = '${(await getTemporaryDirectory()).path}/video.mp4';
-    await _cameraController.startVideoRecording();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_cameraController == null || !_cameraController.value.isInitialized) {
-      return Container();
+    if (_isLoading) {
+      return Container(
+        color: Colors.white,
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    } else {
+      return Center(
+        child: Stack(
+          alignment: Alignment.bottomCenter,
+          children: [
+            CameraPreview(_cameraController),
+            Padding(
+              padding: const EdgeInsets.all(25),
+              child: FloatingActionButton(
+                backgroundColor: Colors.red,
+                child: Icon(_isRecording ? Icons.stop : Icons.circle),
+                onPressed: () => _recordVideo(),
+              ),
+            ),
+          ],
+        ),
+      );
     }
-
-    return Container(
-      color: Colors.black,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          Text(
-            '$_secondsLeft seconds left',
-            style: TextStyle(fontSize: 32, color: Colors.white),
-          ),
-          SizedBox(height: 16),
-          IconButton(
-            icon: Icon(Icons.videocam, size: 64, color: Colors.white),
-            onPressed: _startRecording,
-          ),
-        ],
-      ),
-    );
   }
 }
